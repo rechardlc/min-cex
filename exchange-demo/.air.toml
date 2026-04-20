@@ -1,0 +1,26 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/exchange"
+  cmd = "go build -o ./tmp/exchange ."
+  delay = 1000
+  exclude_dir = ["tmp", "vendor", "docs", "bin"]
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "mod"]
+  kill_delay = "0.1s"
+  log = "build-errors.log"
+  send_interrupt = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true
