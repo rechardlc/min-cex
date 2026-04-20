@@ -10,31 +10,26 @@
 
 - `README.md`：了解项目目标。
 - `main.go`：看程序如何启动，以及如何模拟交易流。
-- `orderbook/orderbook.go`：项目核心，订单簿和撮合都在这里。
-- `server/server.go`：HTTP API 和交易所服务外壳。
-- `client/client.go`：调用 HTTP API 的客户端封装。
+- `orderbook/orderbook.go`：项目核心，订单薄和撮合。
+- `server/server.go`：HTTP API 及内部 PostgreSQL 记账。
+- `db/` 和 `cmd/`：数据库连接、迁移、Mock 流水线。
+- `client/client.go`：调用 HTTP API 的封装。
 - `mm/maker.go`：自动做市脚本。
-- `orderbook/orderbook_test.go`：订单簿行为测试。
 
 建议先画出这条主链路：
 
 ```text
-main.go
-  -> 启动 server
-  -> 创建 client
-  -> 启动 market maker
-  -> 周期性提交 market order
-  -> server 接收订单
-  -> orderbook 撮合订单
-  -> 记录 trade
-  -> 模拟链上转账结算
+docker compose up (启动 PG 数据库)
+  -> 运行迁移及 seed
+  -> main.go 启动 server
+  -> server 连接 DB 并常驻内存对账本镜像
+  -> market maker & 散户持续发 request
+  -> orderbook 撮合出结果 -> 写入 PG 结案
 ```
 
 学完这一阶段，你应该能回答：
 
-- 这个项目为什么更像 CEX，而不是 DEX？
-- 订单簿、撮合引擎、API、做市机器人分别负责什么？
-- 链上转账在这个项目里是核心逻辑，还是成交后的附加结算演示？
+- 为什么 CEX 速度快？订单簿、撮合引擎和传统金融数据库的关系是？
 
 ## 1. 订单簿数据结构
 
@@ -285,47 +280,47 @@ makerLoop
 - 修改 `MinSpread`，观察 maker 是否还继续挂单。
 - 把 `simulateFetchCurrentETHPrice` 改成随机价格，观察 seed 行为。
 
-## 8. 链上模拟结算
+## 8. 内部账本与 PostgreSQL 持久化结算
 
-重点文件：`server/server.go`
+重点文件：`server/server.go` 与 `db/` 目录
 
 重点函数：
 
-- `handleMatches`
-- `transferETH`
+- `handleMatches` (内存账户扣血加血并原子入库)
+- GORM 模型: `UserModel`, `TradeModel`
+- `db.MigrateUp`
 
-这部分不是撮合核心，而是成交之后的模拟结算。
+这部分是成交之后的清结算。真实 CEX 的资产交割是在自己服务器内部完成的，而不是上链。我们使用了 PostgreSQL + GORM 来模拟这套极速记账机制。
 
-当前逻辑大概是：
+当前核心结算流程：
 
 ```text
 订单撮合成功
-  -> 得到 matches
-  -> 找到 ask 用户和 bid 用户
-  -> 从卖方私钥地址向买方地址转 ETH
-  -> 通过 Ganache RPC 发送交易
+  -> 得到 matches，遍历每一个 match 寻找买卖双边
+  -> 内存账户操作：卖方余额增加，买方余额扣除
+  -> 开启数据库事务 (DB.Transaction)
+  -> DB UPDATE user 账本记录落盘
+  -> DB INSERT trade 成交记录落盘
 ```
 
 学习重点：
 
-- `ethclient.Dial("http://localhost:8545")` 连接本地链。
-- `crypto.HexToECDSA` 从私钥构造账户。
-- `PendingNonceAt` 获取 nonce。
-- `types.NewTransaction` 构造交易。
-- `types.SignTx` 签名交易。
-- `SendTransaction` 发送交易。
+- `gorm.Open` 建立连接以及配置 Logger。
+- `golang-migrate` 与 `go:embed` 搭配：将由 SQL 组成的 Schema 版本化构建进可执行二进制文件内。
+- 事务 (`tx *gorm.DB`) 回滚机制：确保买卖双边以及成交记录对齐进出一致。
+- 内存镜像：为什么 `ex.Users` 在内存里先扣一笔？以空间换时间。
 
 重要提醒：
 
-- 这里的私钥是硬编码，只能用于本地教学环境。
-- 真实交易所不能这样托管和使用用户私钥。
-- 真实资产结算远比这里复杂，需要余额校验、手续费、失败重试、风控、审计和持久化。
+- 这极大提高了响应速度并降低 Gas 费用，但这也带来了资金全权受项目方服务器控制的问题。
+- 真实的交易所会引入极其严格的风控引擎以及多级资金对账，不是简单的余额加减。
 
 练习：
 
-- 启动 Ganache 后运行项目，观察链上交易是否发出。
-- 给 `transferETH` 增加日志，打印 from、to、amount、tx hash。
-- 思考：如果链上转账失败，撮合结果应该回滚吗？
+- 使用 Docker 运行环境内的 Postgres ，并使用 SQL 查询观察 `trades` 与 `users` 表的变化。
+- 理解项目中 `Makefile` (`make build`, `make dev`) 和 `cmd/migrate` CLI 的作用。
+- 思考：如果在向 `users` 发起 DB update 扣取余额的过程中进程崩溃了，但是上层撮合引擎已经被消化了，该如何恢复数据一致性？
+
 
 ## 9. 从 CEX 到 DEX 的概念对照
 
@@ -443,17 +438,18 @@ DEX 常见风格：
 - 修改做市参数，观察订单簿变化。
 - 写一段笔记解释 maker 为什么提供流动性。
 
-### Day 7：链上结算
+### Day 7：数据库存储与结算
 
 目标：
 
-- 看懂 `handleMatches` 和 `transferETH`。
-- 理解撮合和结算是两个阶段。
+- 看懂 `handleMatches` 中的 GORM 事务运作
+- 看懂 `db/migrate.go` 以及 `embed` 的原生静态绑定用法
+- 理解核心撮合引擎（内存动作）和 数据库持久化结算 的业务切分
 
 产出：
 
-- 启动 Ganache，观察转账。
-- 记录成交和链上交易之间的关系。
+- 用 docker-compose 后台启动测试数据库。
+- 观察终端内做市跑出成交后，用类似 DataGrip 的客户端去查验数据库内 balance 的变化。
 
 ### Day 8：重构和扩展
 
@@ -480,8 +476,8 @@ DEX 常见风格：
 - 市价单没有足够流动性时应该全部拒绝，还是部分成交？
 - 订单取消时，如何避免取消已经成交的订单？
 - 真实交易所如何处理用户余额冻结？
-- 撮合成功但结算失败怎么办？
-- 交易所内部账本和链上转账应该如何协调？
+- 如果扣取用户余额时 DB 写失败怎么办？
+- 撮合引擎崩盘，内存索引丢失可以靠 DB 还原吗？
 - 为什么真实系统通常不用 `float64` 处理金额？
 - 订单 ID 应该如何生成才可靠？
 - 成交记录为什么需要持久化和审计？

@@ -62,5 +62,10 @@ build/
 .vscode/
 *.swp
 *.swo
+*.swn
 .DS_Store
+
+# Air hot reload
+tmp/
+build-errors.log
 Thumbs.db
