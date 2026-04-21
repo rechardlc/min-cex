@@ -69,3 +69,4 @@ build/
 tmp/
 build-errors.log
 Thumbs.db
+.history/
