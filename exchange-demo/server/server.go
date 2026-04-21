@@ -73,6 +73,11 @@ type (
 	APIError struct {
 		Error string `json:"Error"`
 	}
+
+	// Error
+	ResponseError struct {
+		Msg string `json:"msg"`
+	}
 )
 
 // GetOrdersResponse 是 GET /order/:userID 的响应结构（导出供 client 包使用）。
@@ -90,6 +95,7 @@ type UserModel struct {
 	Balance float64 `gorm:"default:0"`
 }
 
+// 指定结构体返回的表名
 func (UserModel) TableName() string { return "users" }
 
 // TradeModel 是持久化到 PostgreSQL 的成交记录。
@@ -148,7 +154,7 @@ func StartServer() {
 	// 确保系统用户存在（做市商/测试用户）
 	ex.registerUser(8, 10000)
 	ex.registerUser(7, 10000)
-	ex.registerUser(666, 10000)
+	ex.registerUser(99, 10000)
 
 	// 从 DB 加载所有用户到内存（包含 seed 写入的模拟用户）
 	if err := ex.loadUsersFromDB(); err != nil {
@@ -174,7 +180,7 @@ func StartServer() {
 // Exchange 是交易所的核心结构体。
 type Exchange struct {
 	DB         *gorm.DB
-	mu         sync.RWMutex
+	mu         sync.RWMutex                 //
 	Users      map[int64]*User              // 内存用户（余额镜像，撮合时使用）
 	Orders     map[int64][]*orderbook.Order // UserID → 活跃订单
 	orderbooks map[Market]*orderbook.Orderbook
@@ -195,8 +201,8 @@ func NewExchange(db *gorm.DB) *Exchange {
 // registerUser 注册用户到内存和数据库（幂等：已存在则跳过，余额从 DB 读取）。
 func (ex *Exchange) registerUser(userID int64, initialBalance float64) {
 	var um UserModel
-	result := ex.DB.Where("user_id = ?", userID).First(&um)
-	if result.Error == gorm.ErrRecordNotFound {
+	err := ex.DB.Where("user_id = ?", userID).First(&um).Error
+	if err == gorm.ErrRecordNotFound {
 		um = UserModel{UserID: userID, Balance: initialBalance}
 		ex.DB.Create(&um)
 	}
@@ -263,7 +269,7 @@ func (ex *Exchange) handleGetOrders(c echo.Context) error {
 		return err
 	}
 
-	ex.mu.RLock()         // 并发控制：保护内存 map `ex.Orders` 不在读取时被修改
+	ex.mu.RLock() // 并发控制：保护内存 map `ex.Orders` 不在读取时被修改
 	orderbookOrders := ex.Orders[int64(userID)]
 	resp := &GetOrdersResponse{Asks: []Order{}, Bids: []Order{}}
 
@@ -372,9 +378,9 @@ func (ex *Exchange) cancelOrder(c echo.Context) error {
 
 	ob := ex.orderbooks[MarketETH]
 	order := ob.Orders[int64(id)]
-	
+
 	// 从内存撮合引擎的订单薄里移除该挂单
-	ob.CancelOrder(order) 
+	ob.CancelOrder(order)
 
 	logrus.WithField("orderID", id).Info("order canceled")
 	return c.JSON(200, map[string]any{"msg": "order deleted"})
@@ -423,16 +429,18 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 		}
 	}
 
-	// 分支二：处理市价单（不管多少钱立刻吃单，因此不需要透传 Price）
 	if req.Type == MarketOrder {
-		matches, _ := ex.handlePlaceMarketOrder(market, order)
+		matches, _, err := ex.handlePlaceMarketOrder(market, order)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, APIError{Error: err.Error()})
+		}
 		// 如果吃单成功，会产生撮合记录匹配(matches)，执行后续结算链下处理
-		if err := ex.handleMatches(string(market), matches); err != nil {
-			return err
+		if err := ex.handleMatches(string(market), matches, order.Bid); err != nil {
+			return c.JSON(http.StatusOK, &ResponseError{Msg: err.Error()})
 		}
 	}
 
-	return c.JSON(200, &PlaceOrderResponse{OrderID: order.ID})
+	return c.JSON(http.StatusOK, &PlaceOrderResponse{OrderID: order.ID})
 }
 
 // ─── 核心业务 ──────────────────────────────────────────────────────────────
@@ -440,7 +448,7 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 // handlePlaceLimitOrder 核心逻辑：用户下限价单
 func (ex *Exchange) handlePlaceLimitOrder(market Market, price float64, order *orderbook.Order) error {
 	ob := ex.orderbooks[market]
-	
+
 	// 在底层的撮合引擎记录单子位置。限价单是"Maker"行为。
 	ob.PlaceLimitOrder(price, order)
 
@@ -453,9 +461,12 @@ func (ex *Exchange) handlePlaceLimitOrder(market Market, price float64, order *o
 }
 
 // handlePlaceMarketOrder 核心逻辑：用户下市价单
-func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order) ([]orderbook.Match, []*MatchedOrder) {
+func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order) ([]orderbook.Match, []*MatchedOrder, error) {
 	ob := ex.orderbooks[market]
-	matches := ob.PlaceMarketOrder(order) // "Taker"过程：执行连续多次匹配，吃掉深度订单薄上的单
+	matches, err := ob.PlaceMarketOrder(order) // "Taker"过程：执行连续多次匹配，吃掉深度订单薄上的单
+	if err != nil {
+		return nil, nil, err
+	}
 	matchedOrders := make([]*MatchedOrder, len(matches))
 
 	isBid := order.Bid
@@ -466,8 +477,8 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 	for i, match := range matches {
 		id := match.Bid.ID
 		limitUserID := match.Bid.UserID // 挂单方(Maker方)是买单的话是谁被吃
-		if isBid { // 自己是市价头寸，且自己是买方，这意味着对方（挂单方Maker）就是被卖吃单
-			limitUserID = match.Ask.UserID 
+		if isBid {                      // 自己是市价头寸，且自己是买方，这意味着对方（挂单方Maker）就是被卖吃单
+			limitUserID = match.Ask.UserID
 			id = match.Ask.ID
 		}
 		// 记录内部对账流转的抽象模型
@@ -478,7 +489,7 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 			Price:  match.Price,
 		}
 		totalSizeFilled += match.SizeFilled
-		sumPrice += match.Price  // 累加总花了多少钱
+		sumPrice += match.Price // 累加总花了多少钱
 	}
 
 	// avgPrice是本笔大市价单打出来的"滑点均价"
@@ -502,7 +513,7 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 	ex.Orders = newOrderMap // 将干净的、尚未撮合彻底的订单集合重新绑回
 	ex.mu.Unlock()
 
-	return matches, matchedOrders
+	return matches, matchedOrders, nil
 }
 
 // handleMatches 处理撮合后的链下账本结算，并持久化成交记录到 PostgreSQL。
@@ -512,7 +523,7 @@ func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order
 //  2. Bid（买方）余额 -= SizeFilled（买入付款）
 //  3. 写 TradeModel 到 DB
 //  4. 更新 UserModel 余额到 DB
-func (ex *Exchange) handleMatches(market string, matches []orderbook.Match) error {
+func (ex *Exchange) handleMatches(market string, matches []orderbook.Match, isTakerBid bool) error {
 	return ex.DB.Transaction(func(tx *gorm.DB) error {
 		for _, match := range matches {
 			askUser, ok := ex.Users[match.Ask.UserID]
@@ -548,7 +559,7 @@ func (ex *Exchange) handleMatches(market string, matches []orderbook.Match) erro
 				Market:    market,
 				Price:     match.Price,
 				Size:      match.SizeFilled,
-				Bid:       true,
+				Bid:       isTakerBid,
 				BidUserID: match.Bid.UserID,
 				AskUserID: match.Ask.UserID,
 			}

@@ -1,10 +1,10 @@
 DSN ?= "postgres://cex:cex_secret@localhost:5432/cex_db?sslmode=disable"
 
 build:
-	go build -o bin/exchange .
+	go build -o bin/exchange.exe .
 
 run: build
-	./bin/exchange
+	./bin/exchange.exe
 
 test:
 	go test -v ./...

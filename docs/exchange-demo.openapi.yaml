@@ -1,0 +1,497 @@
+openapi: 3.0.3
+info:
+  title: exchange-demo API
+  version: 0.1.0
+  description: >
+    Minimal CEX demo API. It supports placing limit and market orders,
+    reading the orderbook, reading trades, canceling orders, and reading user balances.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+tags:
+  - name: Orders
+    description: Order placement, query, and cancel APIs.
+  - name: Orderbook
+    description: Market orderbook query APIs.
+  - name: Trades
+    description: Trade query APIs.
+  - name: Users
+    description: User account APIs.
+
+paths:
+  /order:
+    post:
+      tags:
+        - Orders
+      summary: Place an order
+      description: Place a LIMIT or MARKET order in the ETH market.
+      operationId: placeOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceOrderRequest"
+            examples:
+              limitBid:
+                summary: Place a bid limit order
+                value:
+                  UserID: 8
+                  Type: LIMIT
+                  Bid: true
+                  Size: 10
+                  Price: 960
+                  Market: ETH
+              limitAsk:
+                summary: Place an ask limit order
+                value:
+                  UserID: 8
+                  Type: LIMIT
+                  Bid: false
+                  Size: 10
+                  Price: 1040
+                  Market: ETH
+              marketBuy:
+                summary: Place a market buy order
+                value:
+                  UserID: 100
+                  Type: MARKET
+                  Bid: true
+                  Size: 1
+                  Price: 0
+                  Market: ETH
+              marketSell:
+                summary: Place a market sell order
+                value:
+                  UserID: 101
+                  Type: MARKET
+                  Bid: false
+                  Size: 1
+                  Price: 0
+                  Market: ETH
+      responses:
+        "200":
+          description: Order accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaceOrderResponse"
+              example:
+                OrderID: 123456
+        "400":
+          description: Bad request or insufficient volume.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                Error: "not enough volume [size: 0.00] for market order [size: 1.00]"
+
+  /order/{userID}:
+    get:
+      tags:
+        - Orders
+      summary: Get open orders by user
+      operationId: getOrdersByUser
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User open orders grouped by side.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetOrdersResponse"
+              example:
+                Asks:
+                  - UserID: 8
+                    ID: 111
+                    Price: 1040
+                    Size: 10
+                    Bid: false
+                    Timestamp: 1710000000000000000
+                Bids:
+                  - UserID: 8
+                    ID: 112
+                    Price: 960
+                    Size: 10
+                    Bid: true
+                    Timestamp: 1710000001000000000
+
+  /order/{id}:
+    delete:
+      tags:
+        - Orders
+      summary: Cancel an order
+      description: Cancel an existing order by order ID.
+      operationId: cancelOrder
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          example: 123456
+      responses:
+        "200":
+          description: Order canceled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                msg: order deleted
+
+  /book/{market}:
+    get:
+      tags:
+        - Orderbook
+      summary: Get full orderbook
+      operationId: getOrderbook
+      parameters:
+        - $ref: "#/components/parameters/Market"
+      responses:
+        "200":
+          description: Full orderbook for the market.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderbookData"
+              example:
+                TotalBidVolume: 30
+                TotalAskVolume: 20
+                Asks:
+                  - UserID: 8
+                    ID: 2001
+                    Price: 1040
+                    Size: 10
+                    Bid: false
+                    Timestamp: 1710000000000000000
+                Bids:
+                  - UserID: 8
+                    ID: 2002
+                    Price: 960
+                    Size: 10
+                    Bid: true
+                    Timestamp: 1710000001000000000
+        "400":
+          description: Market not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                msg: market not found
+
+  /book/{market}/bid:
+    get:
+      tags:
+        - Orderbook
+      summary: Get best bid
+      operationId: getBestBid
+      parameters:
+        - $ref: "#/components/parameters/Market"
+      responses:
+        "200":
+          description: Best bid order. Empty order fields are returned when no bid exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+              example:
+                UserID: 8
+                ID: 0
+                Price: 960
+                Size: 0
+                Bid: false
+                Timestamp: 0
+
+  /book/{market}/ask:
+    get:
+      tags:
+        - Orderbook
+      summary: Get best ask
+      operationId: getBestAsk
+      parameters:
+        - $ref: "#/components/parameters/Market"
+      responses:
+        "200":
+          description: Best ask order. Empty order fields are returned when no ask exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+              example:
+                UserID: 8
+                ID: 0
+                Price: 1040
+                Size: 0
+                Bid: false
+                Timestamp: 0
+
+  /trades/{market}:
+    get:
+      tags:
+        - Trades
+      summary: Get recent trades
+      description: Returns up to 200 recent trades ordered by created_at descending.
+      operationId: getTrades
+      parameters:
+        - $ref: "#/components/parameters/Market"
+      responses:
+        "200":
+          description: Recent trades.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TradeModel"
+              example:
+                - ID: 1
+                  CreatedAt: "2026-04-20T12:00:00Z"
+                  UpdatedAt: "2026-04-20T12:00:00Z"
+                  DeletedAt: null
+                  Market: ETH
+                  Price: 960
+                  Size: 1
+                  Bid: true
+                  BidUserID: 100
+                  AskUserID: 8
+
+  /user/{userID}/balance:
+    get:
+      tags:
+        - Users
+      summary: Get user balance
+      operationId: getUserBalance
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User balance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceResponse"
+              example:
+                userID: 8
+                balance: 10000
+        "400":
+          description: Invalid userID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                Error: invalid userID
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+              example:
+                Error: user not found
+
+components:
+  parameters:
+    Market:
+      name: market
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - ETH
+      example: ETH
+
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      example: 8
+
+  schemas:
+    OrderType:
+      type: string
+      enum:
+        - MARKET
+        - LIMIT
+
+    Market:
+      type: string
+      enum:
+        - ETH
+
+    PlaceOrderRequest:
+      type: object
+      required:
+        - UserID
+        - Type
+        - Bid
+        - Size
+        - Market
+      properties:
+        UserID:
+          type: integer
+          format: int64
+          example: 8
+        Type:
+          $ref: "#/components/schemas/OrderType"
+        Bid:
+          type: boolean
+          description: true means buy or bid; false means sell or ask.
+          example: true
+        Size:
+          type: number
+          format: double
+          example: 10
+        Price:
+          type: number
+          format: double
+          description: Required by LIMIT orders. Ignored by MARKET orders in current client code.
+          example: 960
+        Market:
+          $ref: "#/components/schemas/Market"
+
+    PlaceOrderResponse:
+      type: object
+      properties:
+        OrderID:
+          type: integer
+          format: int64
+          example: 123456
+
+    Order:
+      type: object
+      properties:
+        UserID:
+          type: integer
+          format: int64
+          example: 8
+        ID:
+          type: integer
+          format: int64
+          example: 123456
+        Price:
+          type: number
+          format: double
+          example: 960
+        Size:
+          type: number
+          format: double
+          example: 10
+        Bid:
+          type: boolean
+          example: true
+        Timestamp:
+          type: integer
+          format: int64
+          example: 1710000000000000000
+
+    GetOrdersResponse:
+      type: object
+      properties:
+        Asks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        Bids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+
+    OrderbookData:
+      type: object
+      properties:
+        TotalBidVolume:
+          type: number
+          format: double
+          example: 30
+        TotalAskVolume:
+          type: number
+          format: double
+          example: 20
+        Asks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        Bids:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+
+    TradeModel:
+      type: object
+      properties:
+        ID:
+          type: integer
+          format: int64
+          description: GORM model ID.
+          example: 1
+        CreatedAt:
+          type: string
+          format: date-time
+          example: "2026-04-20T12:00:00Z"
+        UpdatedAt:
+          type: string
+          format: date-time
+          example: "2026-04-20T12:00:00Z"
+        DeletedAt:
+          nullable: true
+          example: null
+        Market:
+          type: string
+          example: ETH
+        Price:
+          type: number
+          format: double
+          example: 960
+        Size:
+          type: number
+          format: double
+          example: 1
+        Bid:
+          type: boolean
+          example: true
+        BidUserID:
+          type: integer
+          format: int64
+          example: 100
+        AskUserID:
+          type: integer
+          format: int64
+          example: 8
+
+    BalanceResponse:
+      type: object
+      properties:
+        userID:
+          type: integer
+          format: int64
+          example: 8
+        balance:
+          type: number
+          format: double
+          example: 10000
+
+    MessageResponse:
+      type: object
+      properties:
+        msg:
+          type: string
+          example: order deleted
+
+    APIError:
+      type: object
+      properties:
+        Error:
+          type: string
+          example: user not found

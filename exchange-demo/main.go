@@ -36,6 +36,7 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -80,7 +81,7 @@ func main() {
 
 	// 第四步：启动一个模拟交易者，在后台随机下市价单。
 	// 这模拟了真实市场中的普通用户交易行为。
-	go marketOrderPlacer(c)
+	// go marketOrderPlacer(c)
 
 	// select{} 是 Go 中让主 goroutine 永久阻塞的惯用写法。
 	// 如果 main 函数返回，所有 goroutine 都会被强制终止。
@@ -120,7 +121,7 @@ func marketOrderPlacer(c *client.Client) {
 
 		_, err := c.PlaceMarketOrder(&order)
 		if err != nil {
-			panic(err)
+			fmt.Printf("place order failed: %v\n", err)
 		}
 
 		<-ticker.C

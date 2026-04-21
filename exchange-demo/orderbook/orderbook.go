@@ -302,7 +302,7 @@ func NewOrderbook() *Orderbook {
 //
 // 例如：一个买入市价单会从最低卖价开始"吃单"，逐步向高价吃，
 // 这就是为什么大额市价单会导致价格滑点（slippage）。
-func (ob *Orderbook) PlaceMarketOrder(o *Order) []Match {
+func (ob *Orderbook) PlaceMarketOrder(o *Order) ([]Match, error) {
 	ob.mu.Lock()
 	defer ob.mu.Unlock()
 
@@ -312,7 +312,7 @@ func (ob *Orderbook) PlaceMarketOrder(o *Order) []Match {
 		// 买入市价单 → 消耗卖单（asks）
 		if o.Size > ob.AskTotalVolume() {
 			// 安全检查：如果要买的数量超过所有卖单的总量，无法成交
-			panic(fmt.Errorf("not enough volume [size: %.2f] for market order [size: %.2f]", ob.AskTotalVolume(), o.Size))
+			return nil, fmt.Errorf("not enough volume [size: %.2f] for market order [size: %.2f]", ob.AskTotalVolume(), o.Size)
 		}
 
 		// 从最低卖价开始，逐个价格档位撮合
@@ -328,7 +328,7 @@ func (ob *Orderbook) PlaceMarketOrder(o *Order) []Match {
 	} else {
 		// 卖出市价单 → 消耗买单（bids）
 		if o.Size > ob.BidTotalVolume() {
-			panic(fmt.Errorf("not enough volume [size: %.2f] for market order [size: %.2f]", ob.BidTotalVolume(), o.Size))
+			return nil, fmt.Errorf("not enough volume [size: %.2f] for market order [size: %.2f]", ob.BidTotalVolume(), o.Size)
 		}
 
 		// 从最高买价开始，逐个价格档位撮合
@@ -358,7 +358,7 @@ func (ob *Orderbook) PlaceMarketOrder(o *Order) []Match {
 		"currentPrice": ob.Trades[len(ob.Trades)-1].Price,
 	}).Info()
 
-	return matches
+	return matches, nil
 }
 
 // PlaceLimitOrder 处理限价单。

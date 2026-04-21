@@ -2,8 +2,8 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  bin = "./tmp/exchange"
-  cmd = "go build -o ./tmp/exchange ."
+  bin = "./tmp/exchange.exe"
+  cmd = "go build -o ./tmp/exchange.exe ."
   delay = 1000
   exclude_dir = ["tmp", "vendor", "docs", "bin"]
   exclude_regex = ["_test.go"]
