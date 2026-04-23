@@ -180,13 +180,14 @@ func StartServer() {
 // Exchange 是交易所的核心结构体。
 type Exchange struct {
 	DB         *gorm.DB
-	mu         sync.RWMutex                 //
+	mu         sync.RWMutex                 // 
 	Users      map[int64]*User              // 内存用户（余额镜像，撮合时使用）
 	Orders     map[int64][]*orderbook.Order // UserID → 活跃订单
-	orderbooks map[Market]*orderbook.Orderbook
+	orderbooks map[Market]*orderbook.Orderbook // 订单簿
 }
 
 func NewExchange(db *gorm.DB) *Exchange {
+	// 根据交易对生成订单簿
 	obs := make(map[Market]*orderbook.Orderbook)
 	obs[MarketETH] = orderbook.NewOrderbook()
 
@@ -264,12 +265,14 @@ func (ex *Exchange) handleGetTrades(c echo.Context) error {
 // 注意：只返回挂着的限价单。
 func (ex *Exchange) handleGetOrders(c echo.Context) error {
 	userIDStr := c.Param("userID")
+	// strconv.Atoi: 将字符串转化为数字 
 	userID, err := strconv.Atoi(userIDStr)
 	if err != nil {
 		return err
 	}
-
+	// 读锁，read lock，
 	ex.mu.RLock() // 并发控制：保护内存 map `ex.Orders` 不在读取时被修改
+	defer ex.mu.RUnlock()
 	orderbookOrders := ex.Orders[int64(userID)]
 	resp := &GetOrdersResponse{Asks: []Order{}, Bids: []Order{}}
 
@@ -290,9 +293,7 @@ func (ex *Exchange) handleGetOrders(c echo.Context) error {
 		} else {
 			resp.Asks = append(resp.Asks, order) // 分类存放
 		}
-	}
-	ex.mu.RUnlock()
-
+	}	
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -418,6 +419,7 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 		return err
 	}
 
+	// 讲req.Market强制转化为Market类型，并且复制market
 	market := Market(req.Market)
 	// 将传入的对象转换给订单薄底层识别的结构：方向(Bid)、数量(Size)、下单者身份(UserID)
 	order := orderbook.NewOrder(req.Bid, req.Size, req.UserID)
@@ -428,7 +430,7 @@ func (ex *Exchange) handlePlaceOrder(c echo.Context) error {
 			return err
 		}
 	}
-
+	// 分支二，市价单：这里会直接撮合，就是Taker
 	if req.Type == MarketOrder {
 		matches, _, err := ex.handlePlaceMarketOrder(market, order)
 		if err != nil {
@@ -462,6 +464,7 @@ func (ex *Exchange) handlePlaceLimitOrder(market Market, price float64, order *o
 
 // handlePlaceMarketOrder 核心逻辑：用户下市价单
 func (ex *Exchange) handlePlaceMarketOrder(market Market, order *orderbook.Order) ([]orderbook.Match, []*MatchedOrder, error) {
+	// 获取订单簿上的标识，这里是以太坊
 	ob := ex.orderbooks[market]
 	matches, err := ob.PlaceMarketOrder(order) // "Taker"过程：执行连续多次匹配，吃掉深度订单薄上的单
 	if err != nil {
