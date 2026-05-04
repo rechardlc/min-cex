@@ -1,0 +1,11 @@
+type HealthReq {}
+
+type HealthResp {
+  message string `json:"message"`
+}
+
+service gateway-api {
+  @handler Health
+  get /healthz (HealthReq) returns (HealthResp)
+}
+

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package account;
+
+option go_package = "./account";
+
+message GetAccountReq {
+  int64 user_id = 1;
+}
+
+message GetAccountResp {
+  int64 user_id = 1;
+  string nickname = 2;
+}
+
+service Account {
+  rpc GetAccount(GetAccountReq) returns (GetAccountResp);
+}
+

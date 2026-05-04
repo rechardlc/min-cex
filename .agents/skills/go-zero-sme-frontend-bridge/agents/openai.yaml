@@ -1,0 +1,5 @@
+interface:
+  display_name: "Go-Zero SME Bridge"
+  short_description: "Build go-zero with frontend analogies."
+  default_prompt: "Use $go-zero-sme-frontend-bridge to plan or implement a go-zero service with frontend-style explanations and progress updates."
+
