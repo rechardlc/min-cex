@@ -1,0 +1,72 @@
+// 一个比较完整基础类型的.proto定义示例
+syntax = "proto3";
+package user.v1;
+
+// 引入官方提供的标准类型（比如时间戳）
+import "google/protobuf/timestamp.proto"; 
+
+// ==========================================
+// 1. 枚举类型 (Enum)
+// ==========================================
+enum Gender {
+  GENDER_UNSPECIFIED = 0; // ⚠️ proto3 强制要求枚举的第一个值必须是 0，作为默认未知状态
+  GENDER_MALE = 1;
+  GENDER_FEMALE = 2;
+  GENDER_OTHER = 3;
+}
+
+// ==========================================
+// 2. 嵌套/复用的数据结构 (Message)
+// ==========================================
+message Address {
+  string country = 1;
+  string city = 2;
+  string detail = 3;
+}
+
+// ==========================================
+// 3. 请求参数 (Request) - 包含各种类型
+// ==========================================
+message CreateUserRequest {
+  // --- 标量类型 (Primitive) ---
+  string username = 1;      // 字符串
+  int32 age = 2;            // 32位整型
+  double height = 3;        // 浮点型（类似 JS 中的 Number）
+  bool is_student = 4;      // 布尔型
+
+  // --- 复杂/引用类型 ---
+  Gender gender = 5;        // 枚举
+
+  repeated string tags = 6; // 数组 (Repeated)
+
+  map<string, string> preferences = 7; // 字典/键值对 (Map)
+
+  Address home_address = 8; // 嵌套对象 (Message)
+
+  // --- 可选字段 (Optional) ---
+  // proto3 默认所有字段都是可选的，但如果不传，会拿到"零值"（比如空字符串或0）。
+  // 加了 optional 后，后端能明确区分“前端没传”和“前端传了空字符串”。
+  optional string bio = 9;  
+}
+
+// ==========================================
+// 4. 返回结果 (Response)
+// ==========================================
+message CreateUserResponse {
+  // 注意：雪花算法生成的 ID 通常是 int64，超过了 JS Number 的最大安全整数 (2^53 - 1)。
+  // gRPC-Web 在编译时，通常会把 int64 转成 string 抛给前端，防止精度丢失。
+  int64 user_id = 1;        
+
+  string message = 2;       
+
+  // 官方标准的时间戳类型，比传 string ("2023-10-01...") 或纯 long 更规范
+  google.protobuf.Timestamp created_at = 3; 
+}
+
+// ==========================================
+// 5. 服务接口 (Service)
+// ==========================================
+service UserService {
+  // 创建用户接口
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+}

@@ -24,7 +24,7 @@ func (c *Calculator) Add(args Args, reply *Reply) error {
 }
 func main() {
 	// new: 创建一个Calculator实例
-	calc := new(Calculator)
+	calc := &Calculator{}
 	// Register: 注册Calculator实例
 	rpc.Register(calc)
 	// Listen: 监听端口
