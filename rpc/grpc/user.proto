@@ -16,11 +16,14 @@ service UserService {
 message GetUserRequest {
     // 这里是1是一个标识位置，用于传递，并不是赋值
     string user_id = 1;
+    double a = 2;
+    double b = 3;
 }
 // message规定的响应类型
 message GetUserResponse {
     string user_id = 1;
     string nickname = 2;
+    double sum = 3;
 }
 // 编译命令
 // --go_out=. 表示生成 go 文件到当前目录,这里是 ./pb_user
